@@ -1,62 +1,96 @@
 import './css/styles.css';
-import { fetchCountries } from './fetchCountries';
-import { debounce } from 'lodash';
 import Notiflix from 'notiflix';
-const DEBOUNCE_DELAY = 300;
-const countryInput = document.querySelector('#search-box');
-const countryList = document.querySelector('.country-list');
+import axios from 'axios';
+import { UnsplashAPI } from './pixabay-api.js';
+import { createGalleryCards } from './gallery-cards.js';
+import SimpleLightbox from 'simplelightbox';
+import 'simplelightbox/dist/simple-lightbox.min.css';
 
-countryInput.addEventListener(
-  'input',
-  debounce(debounceFetchCountry, DEBOUNCE_DELAY)
-);
+const searchFormEl = document.querySelector('.search-form');
+const galleryListEl = document.querySelector('.gallery');
+const loadMoreBtnEl = document.querySelector('.load-more');
+const searchBtnEl = document.querySelector('.search-btn');
 
-function debounceFetchCountry(e) {
-  const name = e.target.value.trim();
-  if (name !== '') {
-    fetchCountries(name)
-      .then(country => renderCountry(country))
-      .catch(error => {
-        if (error.message === '404') {
-          Notiflix.Notify.failure('Oops, there is no country with that name');
-        } else {
-          Notiflix.Notify.failure(
-            `Oops, something went wrong, ${error.message}`
-          );
-        }
-      });
+const unsplashAPI = new UnsplashAPI();
+
+const onSearchFormSubmit = async event => {
+  event.preventDefault();
+
+  searchBtnEl.disabled = true;
+  searchBtnEl.classList.add('disabled');
+
+  unsplashAPI.q = event.target.elements.searchQuery.value;
+  unsplashAPI.page = 1;
+
+  try {
+    const { data } = await unsplashAPI.fetchPhotosByQuery();
+
+    if (data.hits.length === 0) {
+      Notiflix.Notify.failure(
+        'Sorry, there are no images matching your search query. Please try again.'
+      );
+      event.target.reset();
+      searchBtnEl.disabled = false;
+      searchBtnEl.classList.remove('disabled');
+      galleryListEl.innerHTML = '';
+
+      return;
+    }
+
+    if (data.totalHits / 40 > unsplashAPI.page) {
+      loadMoreBtnEl.classList.remove('is-hidden');
+    }
+    Notiflix.Notify.success(`Hooray! We found ${data.totalHits} images.`);
+    galleryListEl.innerHTML = createGalleryCards(data.hits);
+  } catch (err) {
+    console.log(err);
   }
-  countryList.innerHTML = '';
-}
 
-function renderCountry(country) {
-  if (country.length === 1) {
-    const markup = country
-      .map(({ name, capital, population, flags, languages }) => {
-        return `<li>
-      <div class="country-info">
-      <img src="${flags.svg}" width="25" height="20"/><h2> ${name}<h2></div>
-      <p><b>Capital</b>: ${capital}</p>
-      <p><b>Population</b>: ${population}</p>
-      <p><b>Languages</b>: ${languages.map(a => a.name)} </p>
-      </li>`;
-      })
-      .join('');
-    countryList.innerHTML = markup;
-  } else if (country.length >= 2 && country.length < 10) {
-    const markup = country
-      .map(({ name, flags }) => {
-        return `<li>
-      <div class="country-info">
-      <img src="${flags.svg}" widrh="25" height="20"/>
-      <h2> ${name}</h2>
-      </li>`;
-      })
-      .join('');
-    countryList.innerHTML = markup;
-  } else {
-    Notiflix.Notify.info(
-      'Too many matches found. Please enter a more specific name.'
+  searchBtnEl.disabled = false;
+  searchBtnEl.classList.remove('disabled');
+};
+
+const onLoadMoreBtnClick = async event => {
+  event.target.disabled = true;
+  event.target.classList.add('disabled');
+
+  unsplashAPI.page += 1;
+
+  try {
+    const { data } = await unsplashAPI.fetchPhotosByQuery();
+
+    galleryListEl.insertAdjacentHTML(
+      'beforeend',
+      createGalleryCards(data.hits)
     );
+
+    const { height: cardHeight } = document
+      .querySelector('.gallery')
+      .firstElementChild.getBoundingClientRect();
+
+    window.scrollBy({
+      top: cardHeight * 2,
+      behavior: 'smooth',
+    });
+
+    new SimpleLightbox('.gallery a', {
+      captionsData: 'alt',
+      captionDelay: 250,
+    });
+
+    if (data.totalHits / 40 <= unsplashAPI.page) {
+      loadMoreBtnEl.classList.add('is-hidden');
+      Notiflix.Notify.failure(
+        'We are sorry, but you have reached the end of search results.'
+      );
+    }
+  } catch (err) {
+    console.log(err);
   }
-}
+
+  event.target.disabled = false;
+  event.target.classList.remove('disabled');
+};
+
+searchFormEl.addEventListener('submit', onSearchFormSubmit);
+loadMoreBtnEl.addEventListener('click', onLoadMoreBtnClick);
